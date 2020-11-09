@@ -1,0 +1,38 @@
+# NOTE: This is created for Linux docker daemon runtime
+# This Dockerfile allows you to put one or more *.bacpac files in the same folder
+# then when you build, it will fire up SQL and import those BACPACs and then dispose of them.
+# The multiple import commands are concatinated in one RUN to minimize image size.
+
+FROM mcr.microsoft.com/mssql/server:2019-latest
+ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=0
+ENV ACCEPT_EULA=Y
+ENV SA_PASSWORD=<someComplexStringPasword>
+ENV MSSQL_PID=Developer #Or change as appropriate for the license use
+USER root
+
+RUN apt-get update && apt-get install unzip -y
+
+# SqlPackage taken from https://github.com/Microsoft/mssql-docker/issues/135#issuecomment-389245587
+RUN wget -O sqlpackage.zip https://go.microsoft.com/fwlink/?linkid=873926 \
+    && unzip sqlpackage.zip -d /tmp/sqlpackage \
+    && chmod +x /tmp/sqlpackage/sqlpackage
+
+# Copy over all the bacpacs in this same directory
+COPY *.bacpac /var/opt/mssql/backup/
+
+# grep command to check if SQL server is already started taken from https://stackoverflow.com/a/51589787/488695
+# Import <somefile1>.bacpac as <somedbname1> Data...
+RUN ( /opt/mssql/bin/sqlservr & ) | grep -q "Service Broker manager has started" \
+	&& /tmp/sqlpackage/sqlpackage /a:Import /tsn:.,1433 /tdn:<somedbname1> /tu:sa /tp:<someComplexStringPasword> /sf:/var/opt/mssql/backup/<somefile1>.bacpac \
+	&& rm /var/opt/mssql/backup/<somedbname1>.bacpac \
+# Import <somefile2>.bacpac as <somedbname2> Data...
+	&& /tmp/sqlpackage/sqlpackage /a:Import /tsn:.,1433 /tdn:<somedbname2> /tu:sa /tp:<someComplexStringPasword> /sf:/var/opt/mssql/backup/<somefile2>.bacpac \
+	&& rm /var/opt/mssql/backup/<somefile2>.bacpac \
+# Import <somefile3>.bacpac as <somedbname3> Data...
+	&& /tmp/sqlpackage/sqlpackage /a:Import /tsn:.,1433 /tdn:<somedbname3> /tu:sa /tp:<someComplexStringPasword> /sf:/var/opt/mssql/backup/<somefile3>.bacpac \
+	&& rm /var/opt/mssql/backup/<somefile3>.bacpac 
+
+# Remove the SA_PASSWORD env var otherwise you expose this through the image.
+RUN unset SA_PASSWORD
+EXPOSE 1433
+ENTRYPOINT /opt/mssql/bin/sqlservr
